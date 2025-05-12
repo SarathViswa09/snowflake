@@ -5,64 +5,31 @@ terraform {
       version = "~> 0.87"
     }
   }
+  required_version = ">= 1.1.0"
 }
 
 provider "snowflake" {
-  account_name =   var.account_name
+  account_name      = var.account_name
   organization_name = var.organization_name
-  user = var.username
-  password = var.password
-  role = "ACCOUNTADMIN"
+  user              = var.username
+  password          = var.password
+  role              = "ACCOUNTADMIN"
 }
 
-# locals {
-#   roles_privileges_pairs = flatten([
-#     for roles,privs in var.roles_privileges : [
-#       for priv in privs : {
-#         role = roles
-#         privilege = priv
-#       }
-#     ]
-#   ])
-
-#   role_priv_mapping = {
-#     for pairs in local.roles_privileges_pairs :
-#       "${pairs.role}-${replace(pairs.privileges," ","_")}" => pairs
-#   }
-# }
-
-resource "snowflake_user" "user_sarath" {
-  name = "sarath_tf_user_test"
-  login_name = "sarath@tf.com"
-  password = "sarath123!@#"
-}
-
-resource "snowflake_user" "user_sarath_dev" {
-  name = "sarath_tf_user"
-  login_name = "sarath@tf1.com"
-  password = "sarath12!@#"
-}
-
-resource "snowflake_user" "admin_sarath" {
-  name = "sarath_tf"
-  login_name = "sarath@tf.co"
-  password = "sarath123@#"
-}
-
-#Database information
-resource "snowflake_database" "sarath_database" {
+resource "snowflake_database" "db" {
   name = var.database
 }
 
-resource "snowflake_schema" "sarath_schema" {
-  database = snowflake_database.sarath_database.name
+resource "snowflake_schema" "schema" {
+  database = snowflake_database.db.name
   name     = var.schema
 }
 
 resource "snowflake_table" "aws_cred" {
-  database = snowflake_database.sarath_database.name
-  schema = "PUBLIC"
-  name = "AWS_CRED"
+  database = snowflake_database.db.name
+  schema   = snowflake_schema.schema.name
+  name     = "AWS_CRED"
+
   column {
     name = "USER_ID"
     type = "NUMBER(38,0)"
@@ -73,48 +40,80 @@ resource "snowflake_table" "aws_cred" {
   }
 }
 
-#Database roles creation
-resource "snowflake_database_role" "data_db" {
-  database = snowflake_database.sarath_database.name
-  name = "DATA_ENGINEER"
+locals {
+  all_db_roles = distinct(
+    concat(
+      var.database_roles,
+      flatten([ for u in values(var.users) : u.roles ])
+    )
+  )
 }
 
-resource "snowflake_database_role" "master_db" {
-  database = snowflake_database.sarath_database.name
-  name = "MANAGEMENT"
+resource "snowflake_database_role" "db_roles" {
+  for_each = toset(local.all_db_roles)
+  database = snowflake_database.db.name
+  name     = each.key
 }
 
-resource "snowflake_database_role" "dev_db" {
-  database = snowflake_database.sarath_database.name
-  name = "STAFF_ENGINEER"
+resource "snowflake_account_role" "account_roles" {
+  for_each = toset(local.all_db_roles)
+  name     = each.key
 }
 
-resource "snowflake_database_role" "tester_db" {
-  database = snowflake_database.sarath_database.name
-  name = "TEST_ENGINEER"
+resource "snowflake_grant_database_role" "grant_db_to_account" {
+  for_each = toset(local.all_db_roles)
+  database_role_name = snowflake_database_role.db_roles[each.key].fully_qualified_name
+  parent_role_name   = snowflake_account_role.account_roles[each.key].name
 }
 
-#Database privileges
-resource "snowflake_grant_privileges_to_database_role" "grant_priv_master" {
-  database_role_name = "${snowflake_database.sarath_database.name}.${snowflake_database_role.dev_db.name}"
-  privileges        = ["MODIFY"]
-  on_database       = snowflake_database_role.dev_db.database
+resource "snowflake_user" "users" {
+  for_each   = var.users
+  name       = each.key
+  login_name = each.value.login_name
+  password   = each.value.password
 }
 
-resource "snowflake_grant_privileges_to_database_role" "grant_priv_devs" {
-  database_role_name = "${snowflake_database.sarath_database.name}.${snowflake_database_role.dev_db.name}"
-  privileges        = ["USAGE"]
-  on_database       = snowflake_database_role.dev_db.database
+locals {
+  user_role_pairs = flatten([
+    for username, uconf in var.users : [
+      for r in uconf.roles : {
+        user    = username
+        db_role = r
+      }
+    ]
+  ])
+
+  user_role_map = {
+    for p in local.user_role_pairs :
+    "${p.user}-${p.db_role}" => p
+  }
 }
 
-resource "snowflake_grant_privileges_to_database_role" "grant_priv_tester" {
-  database_role_name = "${snowflake_database.sarath_database.name}.${snowflake_database_role.tester_db.name}"
-  privileges        = ["USAGE"]
-  on_database       = snowflake_database_role.tester_db.database
+resource "snowflake_grant_account_role" "db_roles_to_user" {
+  for_each = local.user_role_map
+  role_name = snowflake_account_role.account_roles[each.value.db_role].name
+  user_name = snowflake_user.users[each.value.user].name
 }
 
-resource "snowflake_grant_privileges_to_database_role" "grant_priv_data" {
-  database_role_name = "${snowflake_database.sarath_database.name}.${snowflake_database_role.data_db.name}"
-  privileges        = ["MONITOR"]
-  on_database       = snowflake_database_role.dev_db.database
+locals {
+  priv_pairs = flatten([
+    for role, privs in var.privileges_for_users : [
+      for priv in privs : {
+        role      = role
+        privilege = priv
+      }
+    ]
+  ])
+
+  priv_map = {
+    for p in local.priv_pairs :
+    "${p.role}-${replace(p.privilege, " ", "_")}" => p
+  }
+}
+
+resource "snowflake_grant_privileges_to_database_role" "db_privs" {
+  for_each = local.priv_map
+  database_role_name = snowflake_database_role.db_roles[each.value.role].fully_qualified_name
+  privileges = [ each.value.privilege ]
+  on_database = snowflake_database.db.name
 }
