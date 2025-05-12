@@ -38,8 +38,3 @@ variable "users" {
     roles = list(string)
   }))
 }
-
-# variable "privileges_for_users" {
-#   description = "Allows privileges here based on database_roles"
-#   type = map(list(string))
-# }
