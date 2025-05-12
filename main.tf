@@ -118,4 +118,3 @@ resource "snowflake_grant_privileges_to_database_role" "grant_priv_data" {
   privileges        = ["MONITOR"]
   on_database       = snowflake_database_role.dev_db.database
 }
-
