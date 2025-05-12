@@ -95,6 +95,7 @@ resource "snowflake_grant_account_role" "db_roles_to_user" {
   user_name = snowflake_user.users[each.value.user].name
 }
 
+#privileges are based on user specific roles
 locals {
   priv_pairs = flatten([
     for role, privs in var.privileges_for_users : [
