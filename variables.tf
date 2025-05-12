@@ -14,10 +14,6 @@ variable "organization_name" {
     type = string
 }
 
-variable "role" {
-    type = string
-}
-
 variable "database" {
   type = string
 }
@@ -26,10 +22,10 @@ variable "schema" {
     type = string
 }
 
-# variable "database_roles" {
-#     description = "Database roles such as DATA_ENGINEER, DATA_ANALYST..."
-#     type = list(string)
-# }
+variable "database_roles" {
+    description = "Database roles such as DATA_ENGINEER, DATA_ANALYST..."
+    type = list(string)
+}
 
 variable "users" {
   type = map(object({
@@ -37,4 +33,8 @@ variable "users" {
     password = string
     roles = list(string)
   }))
+}
+
+variable "privileges_for_users" {
+    type = map(list(string))
 }
