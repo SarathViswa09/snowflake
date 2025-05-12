@@ -1,1 +1,0 @@
-This repo is for learning terraforming snowflake
